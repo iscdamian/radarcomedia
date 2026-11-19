@@ -1,0 +1,121 @@
+{
+  "title": "RadarComedy Complete Full Stack Handoff v6",
+  "prepared": "2026-11-18",
+  "files": [
+    {
+      "path": ".env.example",
+      "size": 990,
+      "sha256": "de29809dce066d7c4d07a22305cc648e24d710284179a75367b8198468d7fd07"
+    },
+    {
+      "path": "COMPLETE_SPEC_v6.md",
+      "size": 113418,
+      "sha256": "b261716e2e3af51333a4b4373553cee8fb36127a49d531be173d19beb5b8d4f3"
+    },
+    {
+      "path": "MASTER_SPEC.md",
+      "size": 34856,
+      "sha256": "66f0b3acd8735ad8243b53912cb3dd39a278258ab42c82443c1b65e45666ccc3"
+    },
+    {
+      "path": "README.md",
+      "size": 4661,
+      "sha256": "7e72b6439e5568a0dc09b7638c331949880329da55ef1f86bbe894bd83eefe25"
+    },
+    {
+      "path": "contracts/openapi.v5-reference.yaml",
+      "size": 25237,
+      "sha256": "ad8ae5c172fabd4f70d4c6442bd87cf54aa9a66e5b12473a2f100aa287fe043d"
+    },
+    {
+      "path": "contracts/openapi.yaml",
+      "size": 53582,
+      "sha256": "18d65a7a34748c15f118268bc403a21f2d33f0bc75a2fe754a5b1ecd3cbaf271"
+    },
+    {
+      "path": "docs/AGENT_EXECUTION.md",
+      "size": 5007,
+      "sha256": "810d563ae2edbee36093f27ae208936626129db09db16f0808d5438a49d8f7e5"
+    },
+    {
+      "path": "docs/API_AND_FRONTEND_CONTRACTS.md",
+      "size": 9800,
+      "sha256": "5a4c73289ef996beb8df4dae53e617622b8861785bba0061e1398a41124756f8"
+    },
+    {
+      "path": "docs/BACKEND_AND_DATA.md",
+      "size": 20206,
+      "sha256": "14a07282f30eb031946beb5cc706a32df6ea7775c8b3a0b800faf995ce80c31a"
+    },
+    {
+      "path": "docs/DEPLOYMENT_RUNBOOK.md",
+      "size": 4423,
+      "sha256": "c54ad10802fff4cb47067ecf5e77bfe8755b4be0a62ac2d2f2b12a32d4fd5530"
+    },
+    {
+      "path": "docs/FRONTEND_UX.md",
+      "size": 23537,
+      "sha256": "4f993c49e596b254c1dc4bb4ffa1ec513921e20d703f765454146d099407ccc1"
+    },
+    {
+      "path": "docs/TICKETS_AND_ACCEPTANCE.md",
+      "size": 14880,
+      "sha256": "2b12c99933995e9c8698504a6c30ccc0ce0ecbe46d1eabe2e0dfbd950f514d0b"
+    },
+    {
+      "path": "reference/BACKLOG_v5.md",
+      "size": 9010,
+      "sha256": "2025ee8ea4cd1f4519de090e4acc6e90e56beb28b045a0ae238d9baa96a49a01"
+    },
+    {
+      "path": "reference/MIGRATIONS_v5.md",
+      "size": 4967,
+      "sha256": "409dbe6fd7cb04842d89d579134a242823f1d1bf77beb6e4fb78b0311e90c091"
+    },
+    {
+      "path": "reference/acceptance_cases_v5.json",
+      "size": 4764,
+      "sha256": "3b53bb5e019d4c04b09120d0dc00eb5981329bc1a4eca5f48772dee4be02a7cb"
+    },
+    {
+      "path": "reference/db/V001__initial_schema.sql",
+      "size": 11849,
+      "sha256": "ed5dece9ed8ba45eef34ba22d0e04dc24a263fbaa380bd038aade757d5eca82a"
+    },
+    {
+      "path": "reference/db/V002__public_eligibility.sql",
+      "size": 1495,
+      "sha256": "b84c5d5ed804f1ac47fb53a46821be664c1065f40effe95c1f948d5855eb84f3"
+    },
+    {
+      "path": "reference/db/V003__comedian_public_profiles.sql",
+      "size": 1434,
+      "sha256": "e284243bcf4890f7eaeebebeacc560edd20986fe50c1645cb2a905a3e850d31f"
+    },
+    {
+      "path": "reference/src/RadarComedy.Domain/BusinessRules.cs",
+      "size": 1666,
+      "sha256": "cd61a552250603da492bd90ec1ec8c2770e3d035f415898b50d2c05440f47c37"
+    },
+    {
+      "path": "reference/src/RadarComedy.Domain/Entities.cs",
+      "size": 10982,
+      "sha256": "025d8db2433ad5a38ff5f7926852d1a9051844211429aaee735fbd8472628930"
+    },
+    {
+      "path": "reference/src/RadarComedy.Domain/RadarComedy.Domain.csproj",
+      "size": 302,
+      "sha256": "aeb71542cad675d65a053dda38d99d36a151e709c355ef64d69dd2d7a2b284f9"
+    },
+    {
+      "path": "reference/src/RadarComedy.Infrastructure/RadarComedy.Infrastructure.csproj",
+      "size": 623,
+      "sha256": "3276658504ddb5c6d1526a668ca2671fc2440f6bd4b5a9e63f26e9fc80e61469"
+    },
+    {
+      "path": "reference/src/RadarComedy.Infrastructure/RadarDbContext.cs",
+      "size": 8433,
+      "sha256": "652d9656ca574deb7fd7ac8f02f51295c79ed305b8ea5b2d8e45f6bd15976336"
+    }
+  ]
+}

@@ -1,0 +1,631 @@
+openapi: 3.0.3
+info:
+  title: RadarComedy API
+  version: 0.5.0
+  description: >-
+    MVP contract. Auth/RBAC, moderation and billing are server enforced. This is a design
+    handoff: route handlers and SDKs are not implemented by this file.
+servers:
+  - url: https://api.radarcomedy.example/api/v1
+security: []
+tags:
+  - name: Public
+  - name: Promoter
+  - name: Admin
+  - name: Payments
+paths:
+  /public/occurrences:
+    get:
+      tags: [Public]
+      operationId: searchPublicOccurrences
+      summary: Search paid, approved and visible occurrences
+      description: >-
+        Same endpoint powers list and map. Excludes unpublished, imported, canceled,
+        hidden, suspended, unpaid and out-of-term occurrences by server-side eligibility.
+      parameters:
+        - {name: city, in: query, required: true, schema: {type: string, enum: [SAN_DIEGO, TIJUANA]}}
+        - name: bbox
+          in: query
+          description: minLongitude,minLatitude,maxLongitude,maxLatitude; max area enforced
+          schema: {type: string, example: '-117.25,32.60,-116.85,32.95'}
+        - {name: from, in: query, required: true, schema: {type: string, format: date}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date}}
+        - {name: category, in: query, schema: {type: string}}
+        - {name: showLanguage, in: query, schema: {type: string, enum: [en, es, bilingual, other]}}
+        - {name: freeOnly, in: query, schema: {type: boolean}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: Visible occurrence page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/OccurrenceSummary'}}
+                  nextCursor: {type: string, nullable: true}
+        '400': {$ref: '#/components/responses/BadRequest'}
+  /public/events/{slug}:
+    get:
+      tags: [Public]
+      operationId: getPublicEvent
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Published event from approved snapshot only
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicEventDetail'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /public/events/{slug}/occurrences:
+    get:
+      tags: [Public]
+      operationId: getPublicEventOccurrences
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Upcoming paid, approved occurrences
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/OccurrenceSummary'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /public/comedians/{slug}:
+    get:
+      tags: [Public]
+      operationId: getPublicComedian
+      summary: Retrieve an admin-published comedian profile
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Published comedian details in their original language
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicComedianDetail'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /public/comedians/{slug}/occurrences:
+    get:
+      tags: [Public]
+      operationId: getPublicComedianOccurrences
+      summary: Upcoming eligible paid performances for this comedian
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Only public-approved, paid, unsuppressed future appearances
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/OccurrenceSummary'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /public/newsletter/subscriptions:
+    post:
+      tags: [Public]
+      operationId: subscribeNewsletter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NewsletterSignup'}
+      responses:
+        '202': {description: Confirmation email queued; does not reveal existing address}
+        '400': {$ref: '#/components/responses/BadRequest'}
+  /public/newsletter/confirm:
+    post:
+      tags: [Public]
+      operationId: confirmNewsletter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string}
+      responses:
+        '204': {description: Opt-in confirmed}
+        '400': {$ref: '#/components/responses/BadRequest'}
+  /public/newsletter/unsubscribe:
+    post:
+      tags: [Public]
+      operationId: unsubscribeNewsletter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string}
+      responses:
+        '204': {description: Unsubscribed}
+  /promoter/application:
+    post:
+      tags: [Promoter]
+      security: [{sessionAuth: []}]
+      operationId: submitPromoterApplication
+      description: Caller must have verified email; social/organizer HTTPS URL required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PromoterApplication'}
+      responses:
+        '201':
+          description: Application pending review
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PromoterResult'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /promoter/events:
+    post:
+      tags: [Promoter]
+      security: [{sessionAuth: []}]
+      operationId: createEventDraft
+      description: >-
+        Approved promoter only. Draft is private; backend validates schedule and plan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EventDraftRequest'}
+      responses:
+        '201':
+          description: Private draft event
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PromoterEventResult'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+  /promoter/events/{eventId}/revisions:
+    post:
+      tags: [Promoter]
+      security: [{sessionAuth: []}]
+      operationId: proposeEventRevision
+      summary: Submit a new immutable event snapshot for admin review
+      parameters:
+        - {name: eventId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EventRevisionRequest'}
+      responses:
+        '202':
+          description: Revision pending review; public event unchanged
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RevisionResult'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /promoter/listings/{entitlementId}/checkout:
+    post:
+      tags: [Promoter, Payments]
+      security: [{sessionAuth: []}]
+      operationId: startListingCheckout
+      description: >-
+        Must be approved promoter and approved revision. Price computed by server;
+        amount_total must be 200 or 500 cents in USD, inclusive of all applicable tax.
+      parameters:
+        - {name: entitlementId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 12}}
+      responses:
+        '200':
+          description: Stripe Checkout redirect
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkoutUrl, orderId, totalCents, currency]
+                properties:
+                  checkoutUrl: {type: string, format: uri}
+                  orderId: {type: string, format: uuid}
+                  totalCents: {type: integer, enum: [200, 500]}
+                  currency: {type: string, enum: [USD]}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+  /promoter/listings/{entitlementId}/transfers:
+    post:
+      tags: [Promoter]
+      security: [{sessionAuth: []}]
+      operationId: requestDateTransfer
+      summary: Unlimited transfer requests but each needs approval
+      parameters:
+        - {name: entitlementId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TransferRequest'}
+      responses:
+        '202': {description: Pending review; original public date unchanged}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+  /promoter/occurrences/{occurrenceId}/emergency-hide:
+    post:
+      tags: [Promoter]
+      security: [{sessionAuth: []}]
+      operationId: emergencyHideOccurrence
+      summary: Immediately remove potentially canceled show from active discovery
+      parameters:
+        - {name: occurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 8, maxLength: 2000}
+      responses:
+        '204': {description: Occurrence now suppressed, audit and review queued}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /admin/promoters/pending:
+    get:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: listPromoterApprovals
+      responses:
+        '200':
+          description: Restricted account-approval queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PromoterResult'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /admin/promoters/{promoterId}/decision:
+    post:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: decidePromoter
+      parameters:
+        - {name: promoterId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminDecision'}
+      responses:
+        '200': {description: Approval status and audit updated}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /admin/revisions/pending:
+    get:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: listEventRevisionQueue
+      responses:
+        '200':
+          description: Pending event revisions and diffs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/RevisionResult'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /admin/revisions/{revisionId}/decision:
+    post:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: decideEventRevision
+      parameters:
+        - {name: revisionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/AdminDecision'}
+                - type: object
+                  required: [expectedPublishedRevisionId]
+                  properties:
+                    expectedPublishedRevisionId: {type: string, format: uuid, nullable: true}
+      responses:
+        '200': {description: Decision and public projection updated atomically if paid}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /admin/transfers/{transferId}/decision:
+    post:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: decideTransfer
+      parameters:
+        - {name: transferId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminDecision'}
+      responses:
+        '200': {description: Same-production date move audited and applied atomically}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/ValidationFailed'}
+  /admin/emergency-hides/{hideId}/decision:
+    post:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: reviewEmergencyHide
+      parameters:
+        - {name: hideId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminDecision'}
+      responses:
+        '200': {description: Hide confirmed or dismissed; admin may restore occurrence}
+  /admin/comedians:
+    post:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: createComedianProfile
+      summary: Create draft moderated comedian profile (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminComedianProfileInput'}
+      responses:
+        '201': {description: Draft profile created; not public}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /admin/comedians/{id}:
+    patch:
+      tags: [Admin]
+      security: [{sessionAuth: []}]
+      operationId: updateComedianProfile
+      summary: Admin edits/approves/hides profile; record audit trail
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminComedianProfileInput'}
+      responses:
+        '200': {description: Reviewed profile saved with audited status}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /webhooks/stripe:
+    post:
+      tags: [Payments]
+      operationId: stripeWebhook
+      description: >-
+        Signature-verified raw Stripe request body. Idempotent by stripe_event_id,
+        checkout session and payment intent. Never trust frontend checkout success.
+      parameters:
+        - {name: Stripe-Signature, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '200': {description: Accepted or already processed}
+        '400': {description: Invalid signature or malformed event}
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: radar_session
+      description: Secure, HttpOnly, SameSite session cookie; CSRF protections required.
+  schemas:
+    OccurrenceSummary:
+      type: object
+      required: [occurrenceId, eventId, slug, title, startsAtUtc, localDate, venue, ticketUrl]
+      properties:
+        occurrenceId: {type: string, format: uuid}
+        eventId: {type: string, format: uuid}
+        slug: {type: string}
+        title: {type: string}
+        category: {type: string}
+        showLanguage: {type: string, enum: [en, es, bilingual, other]}
+        startsAtUtc: {type: string, format: date-time}
+        localDate: {type: string, format: date}
+        timeZoneId: {type: string, example: America/Tijuana}
+        venue: {$ref: '#/components/schemas/VenueSummary'}
+        ticketUrl: {type: string, format: uri}
+        performers:
+          type: array
+          description: Only approved published comedian profiles are linked; absent for map-lite responses
+          items: {$ref: '#/components/schemas/PublicComedianSummary'}
+        admissionPriceCents: {type: integer, nullable: true}
+        admissionCurrency: {type: string, enum: [USD, MXN], nullable: true}
+    PublicComedianSummary:
+      type: object
+      required: [comedianId, stageName, slug]
+      properties:
+        comedianId: {type: string, format: uuid}
+        stageName: {type: string}
+        slug: {type: string}
+    PublicComedianDetail:
+      type: object
+      required: [comedianId, stageName, slug]
+      properties:
+        comedianId: {type: string, format: uuid}
+        stageName: {type: string}
+        slug: {type: string}
+        originalBio: {type: string, nullable: true}
+        photoUrl: {type: string, format: uri, nullable: true}
+        homeCity: {type: string, nullable: true}
+        countryCode: {type: string, nullable: true}
+        primaryLanguage: {type: string, nullable: true}
+        instagramUrl: {type: string, format: uri, nullable: true}
+        tikTokUrl: {type: string, format: uri, nullable: true}
+        websiteUrl: {type: string, format: uri, nullable: true}
+    AdminComedianProfileInput:
+      type: object
+      required: [stageName, slug, profileStatus]
+      properties:
+        stageName: {type: string, minLength: 1, maxLength: 180}
+        slug: {type: string, minLength: 2, maxLength: 180}
+        bio: {type: string, nullable: true}
+        photoKey: {type: string, nullable: true}
+        homeCity: {type: string, nullable: true}
+        countryCode: {type: string, nullable: true}
+        primaryLanguage: {type: string, nullable: true}
+        instagramUrl: {type: string, format: uri, pattern: '^https://', nullable: true}
+        tikTokUrl: {type: string, format: uri, pattern: '^https://', nullable: true}
+        websiteUrl: {type: string, format: uri, pattern: '^https://', nullable: true}
+        profileStatus: {type: string, enum: [Draft, Published, Hidden]}
+    VenueSummary:
+      type: object
+      required: [venueId, name, latitude, longitude, cityCode, timeZoneId]
+      properties:
+        venueId: {type: string, format: uuid}
+        name: {type: string}
+        cityCode: {type: string, enum: [SAN_DIEGO, TIJUANA]}
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+        timeZoneId: {type: string}
+    PublicEventDetail:
+      type: object
+      required: [eventId, slug, title, originalDescription, showLanguage, occurrences]
+      properties:
+        eventId: {type: string, format: uuid}
+        slug: {type: string}
+        title: {type: string}
+        originalDescription: {type: string}
+        showLanguage: {type: string}
+        category: {type: string}
+        occurrences:
+          type: array
+          items: {$ref: '#/components/schemas/OccurrenceSummary'}
+    PromoterApplication:
+      type: object
+      required: [displayName, contactName, publicProfileUrl, cityCode]
+      properties:
+        displayName: {type: string, minLength: 2, maxLength: 180}
+        contactName: {type: string, minLength: 2, maxLength: 180}
+        publicProfileUrl: {type: string, format: uri, pattern: '^https://'}
+        cityCode: {type: string, enum: [SAN_DIEGO, TIJUANA]}
+    PromoterResult:
+      type: object
+      required: [id, status]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [PendingReview, Approved, Rejected, Suspended]}
+        displayName: {type: string}
+    RecurrenceInput:
+      type: object
+      required: [frequency, interval, localStartTime, durationMinutes, timeZoneId]
+      properties:
+        frequency: {type: string, enum: [Daily, Weekly, Monthly]}
+        interval: {type: integer, minimum: 1, maximum: 31}
+        daysOfWeek: {type: array, items: {type: string, enum: [MO, TU, WE, TH, FR, SA, SU]}}
+        dayOfMonth: {type: integer, minimum: 1, maximum: 31}
+        localStartTime: {type: string, example: '20:00:00'}
+        durationMinutes: {type: integer, minimum: 1, maximum: 1440}
+        timeZoneId: {type: string, example: America/Los_Angeles}
+    EventDraftRequest:
+      type: object
+      required: [title, description, category, showLanguage, format, venueId, firstLocalDate, localStartTime, durationMinutes, ticketUrl]
+      properties:
+        title: {type: string, minLength: 3, maxLength: 200}
+        description: {type: string, minLength: 10}
+        category: {type: string, enum: [StandUp, OpenMic, Improv, Sketch, ComedyTheater, Festival, OtherLiveComedy]}
+        showLanguage: {type: string, enum: [en, es, bilingual, other]}
+        format: {type: string, enum: [Single, Recurring]}
+        venueId: {type: string, format: uuid}
+        firstLocalDate: {type: string, format: date}
+        localStartTime: {type: string, example: '20:00:00'}
+        durationMinutes: {type: integer, minimum: 1}
+        ticketUrl: {type: string, format: uri, pattern: '^https://'}
+        admissionPriceCents: {type: integer, nullable: true, minimum: 0}
+        admissionCurrency: {type: string, enum: [USD, MXN], nullable: true}
+        recurrence: {$ref: '#/components/schemas/RecurrenceInput'}
+    EventRevisionRequest:
+      type: object
+      required: [basedOnRevisionId, snapshot]
+      properties:
+        basedOnRevisionId: {type: string, format: uuid, nullable: true}
+        snapshot: {$ref: '#/components/schemas/EventDraftRequest'}
+    PromoterEventResult:
+      type: object
+      required: [eventId, revisionId, moderationStatus]
+      properties:
+        eventId: {type: string, format: uuid}
+        revisionId: {type: string, format: uuid}
+        moderationStatus: {type: string, enum: [Draft, Submitted, Approved, Rejected]}
+    RevisionResult:
+      type: object
+      required: [revisionId, eventId, status]
+      properties:
+        revisionId: {type: string, format: uuid}
+        eventId: {type: string, format: uuid}
+        status: {type: string, enum: [Draft, Submitted, ChangesRequested, Approved, Rejected, Superseded]}
+        submittedAt: {type: string, format: date-time, nullable: true}
+    TransferRequest:
+      type: object
+      required: [originalOccurrenceId, proposedLocalDate, proposedRevisionId, reason]
+      properties:
+        originalOccurrenceId: {type: string, format: uuid}
+        proposedLocalDate: {type: string, format: date}
+        proposedRevisionId: {type: string, format: uuid}
+        reason: {type: string, minLength: 8}
+    AdminDecision:
+      type: object
+      required: [decision, reason]
+      properties:
+        decision: {type: string, enum: [Approve, Reject]}
+        reason: {type: string, minLength: 3}
+    NewsletterSignup:
+      type: object
+      required: [email, cityCode, language, consent]
+      properties:
+        email: {type: string, format: email}
+        cityCode: {type: string, enum: [SAN_DIEGO, TIJUANA]}
+        language: {type: string, enum: [en, es]}
+        consent: {type: boolean, enum: [true]}
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        code: {type: string, example: LISTING_ALREADY_PAID}
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Forbidden:
+      description: User unauthorized or promoter not approved
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    NotFound:
+      description: Resource absent or not public
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Conflict:
+      description: Version/precondition/status conflict
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    ValidationFailed:
+      description: Business rule validation error
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

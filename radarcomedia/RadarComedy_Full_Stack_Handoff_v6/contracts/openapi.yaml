@@ -1,0 +1,2181 @@
+openapi: 3.0.3
+info:
+  title: RadarComedy API
+  version: 0.6.0
+  description: 'RadarComedy/RadarComedia v6 MVP contract. All server-side public eligibility, auth, moderation,
+    payment and comedian publication rules are specified by MASTER_SPEC.md. This is a contract to implement,
+    not a deployed API. API conventions: JSON camelCase; local dates `YYYY-MM-DD`; UTC instants ISO-8601 `Z`.
+    All modifying endpoints require CSRF tokens when cookie-authenticated, plus caller authorization and ownership.
+    Admin modification endpoints also require an audit reason and optimistic concurrency checks. Public endpoints
+    enforce paid+approved eligibility in API/DB. Draft/hidden comedians return 404. Old v5 reference OpenAPI
+    may differ; this is v6 authoritative design. MVP identity uses ASP.NET Core Identity with cookie auth,
+    email verification, reset, TOTP admin MFA and the documented /auth routes.'
+servers:
+- url: /api/v1
+  description: Same-origin API through Caddy reverse proxy
+security: []
+tags:
+- name: Public
+- name: Identity
+- name: Promoter
+- name: Admin
+- name: Payments
+- name: Media
+paths:
+  /public/occurrences:
+    get:
+      tags:
+      - Public
+      operationId: searchPublicOccurrences
+      summary: Search paid, approved and visible occurrences
+      description: Same endpoint powers list and map. Excludes unpublished, imported, canceled, hidden, suspended,
+        unpaid and out-of-term occurrences by server-side eligibility.
+      parameters:
+      - name: city
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - SAN_DIEGO
+          - TIJUANA
+      - name: bbox
+        in: query
+        description: minLongitude,minLatitude,maxLongitude,maxLatitude; max area enforced
+        schema:
+          type: string
+          example: -117.25,32.60,-116.85,32.95
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: showLanguage
+        in: query
+        schema:
+          type: string
+          enum:
+          - en
+          - es
+          - bilingual
+          - other
+      - name: freeOnly
+        in: query
+        schema:
+          type: boolean
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      responses:
+        '200':
+          description: Visible occurrence page
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OccurrenceSummary'
+                  nextCursor:
+                    type: string
+                    nullable: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /public/events/{slug}:
+    get:
+      tags:
+      - Public
+      operationId: getPublicEvent
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Published event from approved snapshot only
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicEventDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /public/events/{slug}/occurrences:
+    get:
+      tags:
+      - Public
+      operationId: getPublicEventOccurrences
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Upcoming paid, approved occurrences
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OccurrenceSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /public/comedians/{slug}:
+    get:
+      tags:
+      - Public
+      operationId: getPublicComedian
+      summary: Retrieve an admin-published comedian profile
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Published comedian details in their original language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicComedianDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /public/comedians/{slug}/occurrences:
+    get:
+      tags:
+      - Public
+      operationId: getPublicComedianOccurrences
+      summary: Upcoming eligible paid performances for this comedian
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      responses:
+        '200':
+          description: Only public-approved, paid, unsuppressed future appearances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OccurrenceSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /public/newsletter/subscriptions:
+    post:
+      tags:
+      - Public
+      operationId: subscribeNewsletter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewsletterSignup'
+      responses:
+        '202':
+          description: Confirmation email queued; does not reveal existing address
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /public/newsletter/confirm:
+    post:
+      tags:
+      - Public
+      operationId: confirmNewsletter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - token
+              properties:
+                token:
+                  type: string
+      responses:
+        '204':
+          description: Opt-in confirmed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /public/newsletter/unsubscribe:
+    post:
+      tags:
+      - Public
+      operationId: unsubscribeNewsletter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - token
+              properties:
+                token:
+                  type: string
+      responses:
+        '204':
+          description: Unsubscribed
+  /promoter/application:
+    post:
+      tags:
+      - Promoter
+      security:
+      - &id001
+        sessionAuth: []
+      operationId: submitPromoterApplication
+      description: Caller must have verified email; social/organizer HTTPS URL required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromoterApplication'
+      responses:
+        '201':
+          description: Application pending review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromoterResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /promoter/events:
+    post:
+      tags:
+      - Promoter
+      security:
+      - *id001
+      operationId: createEventDraft
+      description: Approved promoter only. Draft is private; backend validates schedule and plan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventDraftRequest'
+      responses:
+        '201':
+          description: Private draft event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromoterEventResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    get:
+      operationId: listOwnPromoterEvents
+      summary: List private and published own events
+      tags:
+      - Promoter
+      security:
+      - *id001
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageOfPromoterEvents'
+  /promoter/events/{eventId}/revisions:
+    post:
+      tags:
+      - Promoter
+      security:
+      - *id001
+      operationId: proposeEventRevision
+      summary: Submit a new immutable event snapshot for admin review
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventRevisionRequest'
+      responses:
+        '202':
+          description: Revision pending review; public event unchanged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevisionResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /promoter/listings/{entitlementId}/checkout:
+    post:
+      tags:
+      - Promoter
+      security:
+      - *id001
+      operationId: startListingCheckout
+      description: Must be approved promoter and approved revision. Price computed by server; amount_total
+        must be 200 or 500 cents in USD, inclusive of all applicable tax.
+      parameters:
+      - name: entitlementId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 12
+      responses:
+        '200':
+          description: Stripe Checkout redirect
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - checkoutUrl
+                - orderId
+                - totalCents
+                - currency
+                properties:
+                  checkoutUrl:
+                    type: string
+                    format: uri
+                  orderId:
+                    type: string
+                    format: uuid
+                  totalCents:
+                    type: integer
+                    enum:
+                    - 200
+                    - 500
+                  currency:
+                    type: string
+                    enum:
+                    - USD
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /promoter/listings/{entitlementId}/transfers:
+    post:
+      tags:
+      - Promoter
+      security:
+      - *id001
+      operationId: requestDateTransfer
+      summary: Unlimited transfer requests but each needs approval
+      parameters:
+      - name: entitlementId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '202':
+          description: Pending review; original public date unchanged
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /promoter/occurrences/{occurrenceId}/emergency-hide:
+    post:
+      tags:
+      - Promoter
+      security:
+      - *id001
+      operationId: emergencyHideOccurrence
+      summary: Immediately remove potentially canceled show from active discovery
+      parameters:
+      - name: occurrenceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 8
+                  maxLength: 2000
+      responses:
+        '204':
+          description: Occurrence now suppressed
+          audit and review queued: null
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /admin/promoters/pending:
+    get:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: listPromoterApprovals
+      responses:
+        '200':
+          description: Restricted account-approval queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PromoterResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/promoters/{promoterId}/decision:
+    post:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: decidePromoter
+      parameters:
+      - name: promoterId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminDecision'
+      responses:
+        '200':
+          description: Approval status and audit updated
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/revisions/pending:
+    get:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: listEventRevisionQueue
+      responses:
+        '200':
+          description: Pending event revisions and diffs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RevisionResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/revisions/{revisionId}/decision:
+    post:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: decideEventRevision
+      parameters:
+      - name: revisionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/AdminDecision'
+              - type: object
+                required:
+                - expectedPublishedRevisionId
+                properties:
+                  expectedPublishedRevisionId:
+                    type: string
+                    format: uuid
+                    nullable: true
+      responses:
+        '200':
+          description: Decision and public projection updated atomically if paid
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/transfers/{transferId}/decision:
+    post:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: decideTransfer
+      parameters:
+      - name: transferId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminDecision'
+      responses:
+        '200':
+          description: Same-production date move audited and applied atomically
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /admin/emergency-hides/{hideId}/decision:
+    post:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: reviewEmergencyHide
+      parameters:
+      - name: hideId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminDecision'
+      responses:
+        '200':
+          description: Hide confirmed or dismissed; admin may restore occurrence
+  /admin/comedians:
+    post:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: createComedianProfile
+      summary: Create draft moderated comedian profile (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminComedianProfileInput'
+      responses:
+        '201':
+          description: Draft profile created; not public
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      operationId: adminListComedians
+      summary: List all comedian profiles and states
+      tags:
+      - Admin
+      security:
+      - *id001
+      parameters:
+      - name: query
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminComedianList'
+  /admin/comedians/{id}:
+    patch:
+      tags:
+      - Admin
+      security:
+      - *id001
+      operationId: updateComedianProfile
+      summary: Admin edits/approves/hides profile; record audit trail
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminComedianProfileInput'
+      responses:
+        '200':
+          description: Reviewed profile saved with audited status
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /webhooks/stripe:
+    post:
+      tags:
+      - Payments
+      operationId: stripeWebhook
+      description: Signature-verified raw Stripe request body. Idempotent by stripe_event_id, checkout session
+        and payment intent. Never trust frontend checkout success.
+      parameters:
+      - name: Stripe-Signature
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Accepted or already processed
+        '400':
+          description: Invalid signature or malformed event
+  /public/comedians:
+    get:
+      operationId: searchPublicComedians
+      summary: Search published comedian profiles
+      tags:
+      - Public
+      parameters:
+      - name: query
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: city
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageOfComedians'
+  /public/events/{eventId}/reports:
+    post:
+      operationId: reportEvent
+      summary: Report inaccurate or abusive public event
+      tags:
+      - Public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventReportInput'
+      responses:
+        '202':
+          description: Accepted
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      summary: Current signed-in user
+      tags:
+      - Identity
+      security:
+      - *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+  /promoter/me:
+    get:
+      operationId: getPromoterDashboard
+      summary: Get own promoter and listing statuses
+      tags:
+      - Promoter
+      security:
+      - *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromoterDashboard'
+  /promoter/events/{eventId}:
+    get:
+      operationId: getOwnPromoterEvent
+      summary: Get private event and moderation status
+      tags:
+      - Promoter
+      security:
+      - *id001
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromoterEventStatus'
+  /promoter/revisions/{revisionId}/submit:
+    post:
+      operationId: submitRevision
+      summary: Submit a private event revision for admin approval
+      tags:
+      - Promoter
+      security:
+      - *id001
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevisionResult'
+      parameters:
+      - name: revisionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /promoter/revisions/{revisionId}:
+    get:
+      operationId: getOwnRevision
+      summary: Get proposed revision and status
+      tags:
+      - Promoter
+      security:
+      - *id001
+      parameters:
+      - name: revisionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevisionResult'
+  /promoter/orders/{orderId}:
+    get:
+      operationId: getOwnCheckoutOrder
+      summary: Read verified order/payment state
+      tags:
+      - Promoter
+      security:
+      - *id001
+      parameters:
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentOrderStatus'
+  /promoter/media/presign-upload:
+    post:
+      operationId: createMediaUploadIntent
+      summary: Create safe upload intent for private media
+      tags:
+      - Media
+      security:
+      - *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadIntentRequest'
+      responses:
+        '201':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadIntentResponse'
+  /admin/overview:
+    get:
+      operationId: adminGetOverview
+      summary: Admin moderation and payment exception counts
+      tags:
+      - Admin
+      security:
+      - *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOverview'
+  /admin/revisions/{revisionId}/diff:
+    get:
+      operationId: adminGetRevisionDiff
+      summary: View immutable revision comparison
+      tags:
+      - Admin
+      security:
+      - *id001
+      parameters:
+      - name: revisionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRevisionDiff'
+  /admin/transfers/pending:
+    get:
+      operationId: adminGetPendingTransfers
+      summary: List pending transfer requests
+      tags:
+      - Admin
+      security:
+      - *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+  /admin/emergency-hides/pending:
+    get:
+      operationId: adminGetPendingEmergencyHides
+      summary: List emergencies awaiting review
+      tags:
+      - Admin
+      security:
+      - *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+  /admin/reports:
+    get:
+      operationId: adminGetReports
+      summary: Moderate public event reports
+      tags:
+      - Admin
+      security:
+      - *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+  /admin/orders/exceptions:
+    get:
+      operationId: adminGetPaymentExceptions
+      summary: Review failed, inconsistent or disputed orders
+      tags:
+      - Admin
+      security:
+      - *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentOrderStatus'
+  /auth/csrf:
+    get:
+      tags:
+      - Identity
+      operationId: getCsrfToken
+      summary: Get form antiforgery token
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsrfToken'
+  /auth/register:
+    post:
+      tags:
+      - Identity
+      operationId: registerUser
+      summary: Register and send verification email
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '202':
+          description: Accepted
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRegister'
+  /auth/verify-email:
+    post:
+      tags:
+      - Identity
+      operationId: verifyEmail
+      summary: Confirm email using signed single-use token
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '204':
+          description: OK
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthVerifyEmail'
+  /auth/login:
+    post:
+      tags:
+      - Identity
+      operationId: loginWithPassword
+      summary: Sign in or request second factor
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthLoginResult'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLogin'
+  /auth/mfa/verify:
+    post:
+      tags:
+      - Identity
+      operationId: verifyLoginMfa
+      summary: Complete admin MFA with temporary challenge
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '200':
+          description: OK
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthMfa'
+  /auth/logout:
+    post:
+      tags:
+      - Identity
+      operationId: logoutUser
+      summary: Revoke current authentication session
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '204':
+          description: OK
+      security:
+      - sessionAuth: []
+  /auth/password/forgot:
+    post:
+      tags:
+      - Identity
+      operationId: forgotPassword
+      summary: Send reset email without disclosing user existence
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '202':
+          description: Accepted
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthForgotPassword'
+  /auth/password/reset:
+    post:
+      tags:
+      - Identity
+      operationId: resetPassword
+      summary: Reset password with single-use token
+      description: ASP.NET Core Identity secure cookie flow. CSRF protection applies to session-creating and
+        state-changing endpoints.
+      responses:
+        '204':
+          description: OK
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthResetPassword'
+  /auth/mfa/setup:
+    get:
+      tags:
+      - Identity
+      operationId: beginAdminMfaEnrollment
+      summary: Begin MFA enrollment for existing privileged admin identity
+      security: &id002
+      - sessionAuth: []
+      responses:
+        '200':
+          description: One-time setup details; no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaSetup'
+  /auth/mfa/enable:
+    post:
+      tags:
+      - Identity
+      operationId: enableAdminMfa
+      summary: Verify TOTP and enable privileged account MFA
+      security: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaEnableRequest'
+      responses:
+        '204':
+          description: MFA enabled
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: radar_session
+      description: Secure, HttpOnly, SameSite session cookie; CSRF protections required.
+  schemas:
+    OccurrenceSummary:
+      type: object
+      required:
+      - occurrenceId
+      - eventId
+      - slug
+      - title
+      - startsAtUtc
+      - localDate
+      - venue
+      properties:
+        occurrenceId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        showLanguage:
+          type: string
+          enum:
+          - en
+          - es
+          - bilingual
+          - other
+        startsAtUtc:
+          type: string
+          format: date-time
+        localDate:
+          type: string
+          format: date
+        timeZoneId:
+          type: string
+          example: America/Tijuana
+        venue:
+          $ref: '#/components/schemas/VenueSummary'
+        ticketUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: Validated external ticket or RSVP page, if present.
+        performers:
+          type: array
+          description: Only approved published comedian profiles are linked; absent for map-lite responses
+          items:
+            $ref: '#/components/schemas/PublicComedianSummary'
+        admissionPriceCents:
+          type: integer
+          nullable: true
+        admissionCurrency:
+          type: string
+          enum:
+          - USD
+          - MXN
+          nullable: true
+        localStartTime:
+          type: string
+          example: '20:00:00'
+    PublicComedianSummary:
+      type: object
+      required:
+      - comedianId
+      - stageName
+      - slug
+      properties:
+        comedianId:
+          type: string
+          format: uuid
+        stageName:
+          type: string
+        slug:
+          type: string
+    PublicComedianDetail:
+      type: object
+      required:
+      - comedianId
+      - stageName
+      - slug
+      properties:
+        comedianId:
+          type: string
+          format: uuid
+        stageName:
+          type: string
+        slug:
+          type: string
+        originalBio:
+          type: string
+          nullable: true
+        photoUrl:
+          type: string
+          format: uri
+          nullable: true
+        homeCity:
+          type: string
+          nullable: true
+        countryCode:
+          type: string
+          nullable: true
+        primaryLanguage:
+          type: string
+          nullable: true
+        instagramUrl:
+          type: string
+          format: uri
+          nullable: true
+        tikTokUrl:
+          type: string
+          format: uri
+          nullable: true
+        websiteUrl:
+          type: string
+          format: uri
+          nullable: true
+    AdminComedianProfileInput:
+      type: object
+      required:
+      - stageName
+      - slug
+      - profileStatus
+      properties:
+        stageName:
+          type: string
+          minLength: 1
+          maxLength: 180
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 180
+        bio:
+          type: string
+          nullable: true
+        photoKey:
+          type: string
+          nullable: true
+        homeCity:
+          type: string
+          nullable: true
+        countryCode:
+          type: string
+          nullable: true
+        primaryLanguage:
+          type: string
+          nullable: true
+        instagramUrl:
+          type: string
+          format: uri
+          pattern: ^https://
+          nullable: true
+        tikTokUrl:
+          type: string
+          format: uri
+          pattern: ^https://
+          nullable: true
+        websiteUrl:
+          type: string
+          format: uri
+          pattern: ^https://
+          nullable: true
+        profileStatus:
+          type: string
+          enum:
+          - Draft
+          - Published
+          - Hidden
+    VenueSummary:
+      type: object
+      required:
+      - venueId
+      - name
+      - latitude
+      - longitude
+      - cityCode
+      - timeZoneId
+      properties:
+        venueId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        cityCode:
+          type: string
+          enum:
+          - SAN_DIEGO
+          - TIJUANA
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        timeZoneId:
+          type: string
+    PublicEventDetail:
+      type: object
+      required:
+      - eventId
+      - slug
+      - title
+      - originalDescription
+      - showLanguage
+      - occurrences
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        title:
+          type: string
+        originalDescription:
+          type: string
+        showLanguage:
+          type: string
+        category:
+          type: string
+        occurrences:
+          type: array
+          items:
+            $ref: '#/components/schemas/OccurrenceSummary'
+    PromoterApplication:
+      type: object
+      required:
+      - displayName
+      - contactName
+      - publicProfileUrl
+      - cityCode
+      properties:
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 180
+        contactName:
+          type: string
+          minLength: 2
+          maxLength: 180
+        publicProfileUrl:
+          type: string
+          format: uri
+          pattern: ^https://
+        cityCode:
+          type: string
+          enum:
+          - SAN_DIEGO
+          - TIJUANA
+    PromoterResult:
+      type: object
+      required:
+      - id
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - PendingReview
+          - Approved
+          - Rejected
+          - Suspended
+        displayName:
+          type: string
+    RecurrenceInput:
+      type: object
+      required:
+      - frequency
+      - interval
+      - localStartTime
+      - durationMinutes
+      - timeZoneId
+      properties:
+        frequency:
+          type: string
+          enum:
+          - Daily
+          - Weekly
+          - Monthly
+        interval:
+          type: integer
+          minimum: 1
+          maximum: 31
+        daysOfWeek:
+          type: array
+          items:
+            type: string
+            enum:
+            - MO
+            - TU
+            - WE
+            - TH
+            - FR
+            - SA
+            - SU
+        dayOfMonth:
+          type: integer
+          minimum: 1
+          maximum: 31
+        localStartTime:
+          type: string
+          example: '20:00:00'
+        durationMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        timeZoneId:
+          type: string
+          example: America/Los_Angeles
+    EventDraftRequest:
+      type: object
+      required:
+      - title
+      - description
+      - category
+      - showLanguage
+      - format
+      - venueId
+      - firstLocalDate
+      - localStartTime
+      - durationMinutes
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 200
+        description:
+          type: string
+          minLength: 10
+        category:
+          type: string
+          enum:
+          - StandUp
+          - OpenMic
+          - Improv
+          - Sketch
+          - ComedyTheater
+          - Festival
+          - OtherLiveComedy
+        showLanguage:
+          type: string
+          enum:
+          - en
+          - es
+          - bilingual
+          - other
+        format:
+          type: string
+          enum:
+          - Single
+          - Recurring
+        venueId:
+          type: string
+          format: uuid
+        firstLocalDate:
+          type: string
+          format: date
+        localStartTime:
+          type: string
+          example: '20:00:00'
+        durationMinutes:
+          type: integer
+          minimum: 1
+        ticketUrl:
+          type: string
+          format: uri
+          pattern: ^https://
+          nullable: true
+          description: External ticket/RSVP URL. Optional for free walk-in shows.
+        admissionPriceCents:
+          type: integer
+          nullable: true
+          minimum: 0
+        admissionCurrency:
+          type: string
+          enum:
+          - USD
+          - MXN
+          nullable: true
+        recurrence:
+          $ref: '#/components/schemas/RecurrenceInput'
+        posterKey:
+          type: string
+          nullable: true
+        performerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Existing published comedian profiles only; stage-name suggestions separately moderated.
+        occurrenceOverrides:
+          type: array
+          items:
+            type: object
+            properties:
+              localDate:
+                type: string
+                format: date
+              ticketUrl:
+                type: string
+                format: uri
+                nullable: true
+              performerIds:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+            required:
+            - localDate
+    EventRevisionRequest:
+      type: object
+      required:
+      - basedOnRevisionId
+      - snapshot
+      properties:
+        basedOnRevisionId:
+          type: string
+          format: uuid
+          nullable: true
+        snapshot:
+          $ref: '#/components/schemas/EventDraftRequest'
+    PromoterEventResult:
+      type: object
+      required:
+      - eventId
+      - revisionId
+      - moderationStatus
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        revisionId:
+          type: string
+          format: uuid
+        moderationStatus:
+          type: string
+          enum:
+          - Draft
+          - Submitted
+          - Approved
+          - Rejected
+    RevisionResult:
+      type: object
+      required:
+      - revisionId
+      - eventId
+      - status
+      properties:
+        revisionId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - Draft
+          - Submitted
+          - ChangesRequested
+          - Approved
+          - Rejected
+          - Superseded
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    TransferRequest:
+      type: object
+      required:
+      - originalOccurrenceId
+      - proposedLocalDate
+      - proposedRevisionId
+      - reason
+      properties:
+        originalOccurrenceId:
+          type: string
+          format: uuid
+        proposedLocalDate:
+          type: string
+          format: date
+        proposedRevisionId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 8
+    AdminDecision:
+      type: object
+      required:
+      - decision
+      - reason
+      properties:
+        decision:
+          type: string
+          enum:
+          - Approve
+          - Reject
+        reason:
+          type: string
+          minLength: 3
+    NewsletterSignup:
+      type: object
+      required:
+      - email
+      - cityCode
+      - language
+      - consent
+      properties:
+        email:
+          type: string
+          format: email
+        cityCode:
+          type: string
+          enum:
+          - SAN_DIEGO
+          - TIJUANA
+        language:
+          type: string
+          enum:
+          - en
+          - es
+        consent:
+          type: boolean
+          enum:
+          - true
+    Problem:
+      type: object
+      required:
+      - type
+      - title
+      - status
+      - code
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          example: LISTING_ALREADY_PAID
+        traceId:
+          type: string
+    PublicComedianListItem:
+      type: object
+      properties:
+        comedianId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        stageName:
+          type: string
+        photoUrl:
+          type: string
+          format: uri
+          nullable: true
+        homeCity:
+          type: string
+          nullable: true
+      required:
+      - comedianId
+      - slug
+      - stageName
+    PageOfComedians:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicComedianListItem'
+        nextCursor:
+          type: string
+          nullable: true
+      required:
+      - items
+    PromoterEventStatus:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+          enum:
+          - Draft
+          - AwaitingReview
+          - ChangesRequested
+          - ApprovedAwaitingPayment
+          - Published
+          - EditPendingApproval
+          - EmergencyHidden
+          - TermExpired
+          - Suspended
+        plan:
+          type: string
+          enum:
+          - Single
+          - RecurringThreeMonths
+        nextLocalDate:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - eventId
+      - status
+      - plan
+    PageOfPromoterEvents:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromoterEventStatus'
+        nextCursor:
+          type: string
+          nullable: true
+      required:
+      - items
+    PromoterDashboard:
+      type: object
+      properties:
+        promoter:
+          $ref: '#/components/schemas/PromoterResult'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromoterEventStatus'
+      required:
+      - promoter
+      - events
+    PaymentOrderStatus:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        entitlementId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - Created
+          - CheckoutOpen
+          - Paid
+          - Failed
+          - Canceled
+          - Refunded
+          - Disputed
+        totalCents:
+          type: integer
+          enum:
+          - 200
+          - 500
+        currency:
+          type: string
+          enum:
+          - USD
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - orderId
+      - entitlementId
+      - status
+      - totalCents
+      - currency
+    CurrentUser:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        emailVerified:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+            enum:
+            - Fan
+            - Promoter
+            - Admin
+        promoterStatus:
+          type: string
+          nullable: true
+      required:
+      - userId
+      - emailVerified
+      - roles
+    EventReportInput:
+      type: object
+      properties:
+        reason:
+          type: string
+          enum:
+          - Canceled
+          - IncorrectDetails
+          - Duplicate
+          - Impersonation
+          - Abuse
+          - Other
+        details:
+          type: string
+          maxLength: 1000
+      required:
+      - reason
+    AdminOverview:
+      type: object
+      properties:
+        pendingPromoters:
+          type: integer
+        pendingRevisions:
+          type: integer
+        pendingTransfers:
+          type: integer
+        emergencyHides:
+          type: integer
+        paymentExceptions:
+          type: integer
+      required:
+      - pendingPromoters
+      - pendingRevisions
+      - pendingTransfers
+      - emergencyHides
+      - paymentExceptions
+    AdminRevisionDiff:
+      type: object
+      properties:
+        revisionId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        currentSnapshot:
+          type: object
+          additionalProperties: true
+          nullable: true
+        proposedSnapshot:
+          type: object
+          additionalProperties: true
+        version:
+          type: integer
+      required:
+      - revisionId
+      - eventId
+      - proposedSnapshot
+      - version
+    AdminComedianListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        stageName:
+          type: string
+        profileStatus:
+          type: string
+          enum:
+          - Draft
+          - Published
+          - Hidden
+      required:
+      - id
+      - slug
+      - stageName
+      - profileStatus
+    AdminComedianList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminComedianListItem'
+        nextCursor:
+          type: string
+          nullable: true
+      required:
+      - items
+    UploadIntentRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+          maxLength: 200
+        contentType:
+          type: string
+          enum:
+          - image/jpeg
+          - image/png
+          - image/webp
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 8388608
+        sha256:
+          type: string
+      required:
+      - filename
+      - contentType
+      - sizeBytes
+    UploadIntentResponse:
+      type: object
+      properties:
+        uploadUrl:
+          type: string
+          format: uri
+        objectKey:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+      - uploadUrl
+      - objectKey
+      - expiresAt
+    AuthRegister:
+      type: object
+      required:
+      - email
+      - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+        preferredLocale:
+          type: string
+          enum:
+          - en
+          - es
+    AuthLogin:
+      type: object
+      required:
+      - email
+      - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    AuthLoginResult:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - SignedIn
+          - MfaRequired
+        nextStep:
+          type: string
+          nullable: true
+    AuthVerifyEmail:
+      type: object
+      required:
+      - token
+      properties:
+        token:
+          type: string
+    AuthMfa:
+      type: object
+      required:
+      - code
+      properties:
+        code:
+          type: string
+          minLength: 6
+          maxLength: 10
+    AuthForgotPassword:
+      type: object
+      required:
+      - email
+      properties:
+        email:
+          type: string
+          format: email
+    AuthResetPassword:
+      type: object
+      required:
+      - token
+      - newPassword
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          minLength: 12
+    CsrfToken:
+      type: object
+      required:
+      - token
+      properties:
+        token:
+          type: string
+    MfaSetup:
+      type: object
+      required:
+      - otpauthUri
+      - manualKey
+      properties:
+        otpauthUri:
+          type: string
+        manualKey:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      description: Admin-only enrollment response, never cached, password reauthentication required.
+    MfaEnableRequest:
+      type: object
+      required:
+      - code
+      properties:
+        code:
+          type: string
+          minLength: 6
+          maxLength: 10
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: User unauthorized or promoter not approved
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource absent or not public
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Version/precondition/status conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ValidationFailed:
+      description: Business rule validation error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
